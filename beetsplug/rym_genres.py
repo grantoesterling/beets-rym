@@ -2,7 +2,7 @@
 
 This plugin fetches genre data from Rate Your Music (RYM) scraped data
 stored in Firebase and applies it to music releases during import.
-Writes descriptors to Moods, genres to Genres, secondary genres to Styles,
+Writes descriptors to Descriptors, genres to Genres, secondary genres to SecondaryGenres,
 and parent genres to Groupings.
 """
 
@@ -55,8 +55,8 @@ class RYMGenresPlugin(BeetsPlugin):
             'firebase_url': '',  # Users must configure this themselves
             'similarity_threshold': 0.8,
             'max_genres': 10,
-            'max_styles': 20,
-            'max_moods': 60,
+            'max_secondary_genres': 20,
+            'max_descriptors': 60,
             'max_groupings': 30,  # Limit for parent genres
             'auto_tag': True,
             'use_hierarchy': True,  # Enable hierarchical parent genre tagging
@@ -77,21 +77,21 @@ class RYMGenresPlugin(BeetsPlugin):
         # Register event listener for import task creation
         self.register_listener('import_task_created', self.on_import_task_created)
         
-        # Add MediaField definitions for style and mood to ensure they get written to files
+        # Add MediaField definitions for secondary_genre and descriptor to ensure they get written to files
         try:
-            # Define style field to be written to SECONDARY_GENRE tag in files
-            style_field = mediafile.MediaField(
+            # Define secondary_genre field to be written to SECONDARY_GENRE tag in files
+            secondary_genre_field = mediafile.MediaField(
                 mediafile.MP3DescStorageStyle(u'Secondary Genre'),
                 mediafile.ListStorageStyle(u'SECONDARY_GENRE'),
             )
-            self.add_media_field('style', style_field)
+            self.add_media_field('secondary_genre', secondary_genre_field)
             
-            # Define mood field to be written to DESCRIPTORS tag in files  
-            mood_field = mediafile.MediaField(
+            # Define descriptor field to be written to DESCRIPTORS tag in files  
+            descriptor_field = mediafile.MediaField(
                 mediafile.MP3DescStorageStyle(u'Descriptors'),
                 mediafile.ListStorageStyle(u'DESCRIPTORS'),
             )
-            self.add_media_field('mood', mood_field)
+            self.add_media_field('descriptor', descriptor_field)
         except ValueError:
             # Fields might already exist, that's okay
             pass
@@ -125,13 +125,13 @@ class RYMGenresPlugin(BeetsPlugin):
                 max_genres = self.config['max_genres'].get(int)
                 new_genre = '; '.join(genres[:max_genres]) if genres and max_genres > 0 else ''
                 
-                styles = release_data.get('secondaryGenres', [])
-                max_styles = self.config['max_styles'].get(int)
-                new_style = '; '.join(styles[:max_styles]) if styles and max_styles > 0 else ''
+                secondary_genres = release_data.get('secondaryGenres', [])
+                max_secondary_genres = self.config['max_secondary_genres'].get(int)
+                new_secondary_genre = '; '.join(secondary_genres[:max_secondary_genres]) if secondary_genres and max_secondary_genres > 0 else ''
                 
-                moods = release_data.get('descriptors', [])
-                max_moods = self.config['max_moods'].get(int)
-                new_mood = '; '.join(moods[:max_moods]) if moods and max_moods > 0 else ''
+                descriptors = release_data.get('descriptors', [])
+                max_descriptors = self.config['max_descriptors'].get(int)
+                new_descriptor = '; '.join(descriptors[:max_descriptors]) if descriptors and max_descriptors > 0 else ''
                 
                 # Calculate groupings (parent genres)
                 groupings = self._get_parent_genres(genres)
@@ -139,13 +139,13 @@ class RYMGenresPlugin(BeetsPlugin):
                 
                 # Check if current tags already match the RYM data
                 current_genre = getattr(album, 'genre', '') or ''
-                current_style = getattr(album, 'style', '') or ''
-                current_mood = getattr(album, 'mood', '') or ''
+                current_secondary_genre = getattr(album, 'secondary_genre', '') or ''
+                current_descriptor = getattr(album, 'descriptor', '') or ''
                 current_grouping = getattr(album, 'grouping', '') or ''
                 
                 if (current_genre == new_genre and 
-                    current_style == new_style and 
-                    current_mood == new_mood and 
+                    current_secondary_genre == new_secondary_genre and 
+                    current_descriptor == new_descriptor and 
                     current_grouping == new_grouping):
                     ui.print_(f"⏭️  Skipping (already up-to-date): {album.albumartist} - {album.album}")
                     total_skipped += 1
@@ -176,11 +176,11 @@ class RYMGenresPlugin(BeetsPlugin):
                 tags_info = []
                 if hasattr(album, 'genre') and album.genre:
                     tags_info.append(f"📁 Genres ({len([g.strip() for g in album.genre.split(';') if g.strip()])}): {album.genre}")
-                if hasattr(album, 'style') and album.style:
-                    tags_info.append(f"🎨 Secondary Genres ({len([s.strip() for s in album.style.split(';') if s.strip()])}): {album.style}")
-                if hasattr(album, 'mood') and album.mood:
-                    mood_list = [m.strip() for m in album.mood.split(';') if m.strip()]
-                    tags_info.append(f"🎭 Descriptors ({len(mood_list)}): {album.mood}")
+                if hasattr(album, 'secondary_genre') and album.secondary_genre:
+                    tags_info.append(f"🎨 Secondary Genres ({len([s.strip() for s in album.secondary_genre.split(';') if s.strip()])}): {album.secondary_genre}")
+                if hasattr(album, 'descriptor') and album.descriptor:
+                    descriptor_list = [d.strip() for d in album.descriptor.split(';') if d.strip()]
+                    tags_info.append(f"🎭 Descriptors ({len(descriptor_list)}): {album.descriptor}")
                 if hasattr(album, 'grouping') and album.grouping:
                     tags_info.append(f"🏷️  Groupings ({len([g.strip() for g in album.grouping.split(';') if g.strip()])}): {album.grouping}")
                 
@@ -252,12 +252,12 @@ class RYMGenresPlugin(BeetsPlugin):
                 if hasattr(album_info, 'genre') and album_info.genre:
                     genres_list = [g.strip() for g in album_info.genre.split(';') if g.strip()]
                     applied_details.append(f"Genres: {', '.join(genres_list)}")
-                if hasattr(album_info, 'style') and album_info.style:
-                    styles_list = [s.strip() for s in album_info.style.split(';') if s.strip()]
-                    applied_details.append(f"Secondary Genres: {', '.join(styles_list)}")
-                if hasattr(album_info, 'mood') and album_info.mood:
-                    moods_list = [m.strip() for m in album_info.mood.split(';') if m.strip()]
-                    applied_details.append(f"Descriptors: {', '.join(moods_list)}")
+                if hasattr(album_info, 'secondary_genre') and album_info.secondary_genre:
+                    secondary_genres_list = [s.strip() for s in album_info.secondary_genre.split(';') if s.strip()]
+                    applied_details.append(f"Secondary Genres: {', '.join(secondary_genres_list)}")
+                if hasattr(album_info, 'descriptor') and album_info.descriptor:
+                    descriptors_list = [d.strip() for d in album_info.descriptor.split(';') if d.strip()]
+                    applied_details.append(f"Descriptors: {', '.join(descriptors_list)}")
                 if hasattr(album_info, 'grouping') and album_info.grouping:
                     groupings_list = [g.strip() for g in album_info.grouping.split(';') if g.strip()]
                     applied_details.append(f"Groupings: {', '.join(groupings_list)}")
@@ -659,17 +659,17 @@ class RYMGenresPlugin(BeetsPlugin):
         if genres and max_genres > 0:
             album_info.genre = '; '.join(genres[:max_genres])  # Store as string for consistency
         
-        # Add styles (secondary genres)
-        styles = release_data.get('secondaryGenres', [])
-        max_styles = self.config['max_styles'].get(int)
-        if styles and max_styles > 0:
-            album_info.style = '; '.join(styles[:max_styles])  # Store as string for consistency
+        # Add secondary genres
+        secondary_genres = release_data.get('secondaryGenres', [])
+        max_secondary_genres = self.config['max_secondary_genres'].get(int)
+        if secondary_genres and max_secondary_genres > 0:
+            album_info.secondary_genre = '; '.join(secondary_genres[:max_secondary_genres])  # Store as string for consistency
         
-        # Add moods (descriptors)
-        moods = release_data.get('descriptors', [])
-        max_moods = self.config['max_moods'].get(int)
-        if moods and max_moods > 0:
-            album_info.mood = '; '.join(moods[:max_moods])  # Store as string for consistency
+        # Add descriptors
+        descriptors = release_data.get('descriptors', [])
+        max_descriptors = self.config['max_descriptors'].get(int)
+        if descriptors and max_descriptors > 0:
+            album_info.descriptor = '; '.join(descriptors[:max_descriptors])  # Store as string for consistency
             
         # Add groupings (parent genres)
         groupings = self._get_parent_genres(genres)
@@ -711,7 +711,7 @@ class RYMGenresPlugin(BeetsPlugin):
             return []
 
     def _apply_rym_tags(self, album):
-        """Apply RYM tags to an album (Genres, Styles, Moods, Groupings)."""
+        """Apply RYM tags to an album (Genres, SecondaryGenres, Descriptors, Groupings)."""
         release_data = self._find_matching_release(album)
         
         if not release_data:
@@ -724,32 +724,32 @@ class RYMGenresPlugin(BeetsPlugin):
         if genres and max_genres > 0:
             album.genre = '; '.join(genres[:max_genres])  # Store as string in database
         
-        # Apply styles (secondary genres)
-        styles = release_data.get('secondaryGenres', [])
-        max_styles = self.config['max_styles'].get(int)
-        if styles and max_styles > 0:
-            album.style = '; '.join(styles[:max_styles])  # Store as string in database
+        # Apply secondary genres
+        secondary_genres = release_data.get('secondaryGenres', [])
+        max_secondary_genres = self.config['max_secondary_genres'].get(int)
+        if secondary_genres and max_secondary_genres > 0:
+            album.secondary_genre = '; '.join(secondary_genres[:max_secondary_genres])  # Store as string in database
         
-        # Apply moods (descriptors)
-        moods = release_data.get('descriptors', [])
-        max_moods = self.config['max_moods'].get(int)
-        if moods and max_moods > 0:
-            album.mood = '; '.join(moods[:max_moods])  # Store as string in database
+        # Apply descriptors
+        descriptors = release_data.get('descriptors', [])
+        max_descriptors = self.config['max_descriptors'].get(int)
+        if descriptors and max_descriptors > 0:
+            album.descriptor = '; '.join(descriptors[:max_descriptors])  # Store as string in database
             
         # Apply groupings (parent genres)
         groupings = self._get_parent_genres(genres)
         if groupings:
             album.grouping = '; '.join(groupings)  # Store as string in database
             
-        if genres or styles or moods or groupings:
+        if genres or secondary_genres or descriptors or groupings:
             # Compact logging - just show what was applied without details
             applied_tags = []
             if genres:
                 applied_tags.append(f"{len(genres)} genres")
-            if styles:
-                applied_tags.append(f"{len(styles)} styles")
-            if moods:
-                applied_tags.append(f"{len(moods)} moods")
+            if secondary_genres:
+                applied_tags.append(f"{len(secondary_genres)} secondary_genres")
+            if descriptors:
+                applied_tags.append(f"{len(descriptors)} descriptors")
             if groupings:
                 applied_tags.append(f"{len(groupings)} groupings")
             
@@ -764,12 +764,12 @@ class RYMGenresPlugin(BeetsPlugin):
         if hasattr(album, 'genre') and album.genre:
             item.genre = album.genre
             tags_copied.append("genre")
-        if hasattr(album, 'style') and album.style:
-            item.style = album.style
-            tags_copied.append("style")
-        if hasattr(album, 'mood') and album.mood:
-            item.mood = album.mood
-            tags_copied.append("mood")
+        if hasattr(album, 'secondary_genre') and album.secondary_genre:
+            item.secondary_genre = album.secondary_genre
+            tags_copied.append("secondary_genre")
+        if hasattr(album, 'descriptor') and album.descriptor:
+            item.descriptor = album.descriptor
+            tags_copied.append("descriptor")
         if hasattr(album, 'grouping') and album.grouping:
             item.grouping = album.grouping
             tags_copied.append("grouping")
@@ -789,7 +789,7 @@ class RYMGenresPlugin(BeetsPlugin):
                 flac_file = FLAC(path_str)
                 
                 # Convert semicolon-separated strings to lists and write as FLAC arrays
-                for field in ['genre', 'style', 'mood', 'grouping']:
+                for field in ['genre', 'secondary_genre', 'descriptor', 'grouping']:
                     if hasattr(item, field):
                         value = getattr(item, field)
                         if value and isinstance(value, str) and ';' in value:
@@ -798,8 +798,8 @@ class RYMGenresPlugin(BeetsPlugin):
                             # Map field names to FLAC tag names
                             tag_name = {
                                 'genre': 'GENRE',
-                                'style': 'SECONDARY_GENRE', 
-                                'mood': 'DESCRIPTORS',
+                                'secondary_genre': 'SECONDARY_GENRE', 
+                                'descriptor': 'DESCRIPTORS',
                                 'grouping': 'GROUPING'
                             }.get(field, field.upper())
                             
@@ -810,8 +810,8 @@ class RYMGenresPlugin(BeetsPlugin):
                             # Handle non-semicolon values
                             tag_name = {
                                 'genre': 'GENRE',
-                                'style': 'SECONDARY_GENRE', 
-                                'mood': 'DESCRIPTORS',
+                                'secondary_genre': 'SECONDARY_GENRE', 
+                                'descriptor': 'DESCRIPTORS',
                                 'grouping': 'GROUPING'
                             }.get(field, field.upper())
                             flac_file[tag_name] = [value]

@@ -1,12 +1,18 @@
 # Beets RYM Genres Plugin
 
-A [beets](https://beets.io/) plugin that fetches genre, style, mood, and grouping data from Rate Your Music (RYM) scraped data and applies it to your music collection during import.
+A [beets](https://beets.io/) plugin that fetches genre, secondary genre, descriptor, and grouping data from Rate Your Music (RYM) scraped data and applies it to your music collection during import.
+
+## Important Disclaimer
+
+**This plugin does not directly access Rate Your Music's servers or API.** Instead, it connects to a Firebase Realtime Database that contains data from a grassroots genre data collection project I made. This approach helps reduce load on RYM's servers while providing access to comprehensive genre data for the music community.
+
+Learn more about this community data project here: (LINK TBD)
 
 ## Features
 
 - **Automatic Genre Tagging**: Fetches primary genres from RYM during import
-- **Secondary Genres**: Applies secondary genres to the `style` field  
-- **Descriptors**: Adds mood descriptors to the `mood` field
+- **Secondary Genres**: Applies secondary genres to the `secondary_genre` field  
+- **Descriptors**: Adds descriptors to the `descriptor` field
 - **Hierarchical Groupings**: Automatically derives parent genres for the `grouping` field
 - **Flexible Matching**: Intelligent fuzzy matching for artist and album names
 - **Caching**: Built-in caching to reduce API calls and improve performance
@@ -56,8 +62,8 @@ rym_genres:
     
     # Tag limits
     max_genres: 10                     # Maximum primary genres
-    max_styles: 20                     # Maximum secondary genres  
-    max_moods: 60                      # Maximum descriptors
+    max_secondary_genres: 20           # Maximum secondary genres  
+    max_descriptors: 60                # Maximum descriptors
     max_groupings: 30                  # Maximum parent genres
     
     # Behavior settings
@@ -138,9 +144,24 @@ beet rym album:"Dark Side of the Moon"
 The plugin maps RYM data to the following beets fields:
 
 - **Genres** → `genre` field (primary RYM genres)
-- **Secondary Genres** → `style` field (secondary RYM genres)  
-- **Descriptors** → `mood` field (RYM descriptors)
+- **Secondary Genres** → `secondary_genre` field (secondary RYM genres)  
+- **Descriptors** → `descriptor` field (RYM descriptors)
 - **Groupings** → `grouping` field (hierarchical parent genres)
+
+### File Metadata Tags
+
+When the plugin writes to your audio files, it uses the following metadata tags:
+
+| Beets Field | File Tag Name | Format | Description |
+|-------------|---------------|--------|-------------|
+| `genre` | `GENRE` | Array/List | Primary genres from RYM |
+| `secondary_genre` | `SECONDARY_GENRE` | Array/List | Secondary genres from RYM |
+| `descriptor` | `DESCRIPTORS` | Array/List | Descriptive tags from RYM |
+| `grouping` | `GROUPING` | Array/List | Hierarchical parent genres |
+
+**FLAC Files**: For FLAC files, the plugin writes these as proper tag arrays (multiple values per tag) using Mutagen for optimal compatibility.
+
+**Other Formats**: For non-FLAC formats, tags are written as semicolon-separated strings using beets' standard MediaFile system.
 
 ## Data Files
 
