@@ -685,7 +685,7 @@ class RYMGenresPlugin(BeetsPlugin):
             album_info.grouping = '; '.join(groupings)  # Store as string for consistency
 
     def _get_parent_genres(self, genres):
-        """Get parent genres for a list of primary genres."""
+        """Get parent genres for a list of primary genres, including top-level genres with no parents."""
         if not self.config['use_hierarchy'].get(bool) or not genres:
             return []
             
@@ -696,12 +696,23 @@ class RYMGenresPlugin(BeetsPlugin):
         try:
             # Get all parent genres for the primary genres
             all_parents = set()
+            top_level_genres = set()  # Track genres that are already top-level
+            
             for genre in genres:
                 parents = self.genre_hierarchy.get_all_parent_genres(genre)
-                all_parents.update(parents)
+                if parents:
+                    # Genre has parents - add them to the parent set
+                    all_parents.update(parents)
+                else:
+                    # Genre has no parents - it's already a top-level genre
+                    top_level_genres.add(genre)
+                    self._log.debug(f"   🔝 '{genre}' is a top-level genre with no parents")
             
             # Remove the original genres from parents (we don't want duplicates)
             all_parents = all_parents - set(genres)
+            
+            # Add top-level genres that have no parents to the groupings
+            all_parents.update(top_level_genres)
             
             # Filter out excluded meta-genres from parent genres
             if hasattr(self.genre_hierarchy, 'excluded_genres'):
@@ -711,6 +722,9 @@ class RYMGenresPlugin(BeetsPlugin):
             # Sort and limit
             max_groupings = self.config['max_groupings'].get(int)
             parent_list = sorted(list(all_parents))
+            
+            if top_level_genres:
+                self._log.debug(f"   🏷️  Added {len(top_level_genres)} top-level genres to groupings: {sorted(list(top_level_genres))}")
             
             return parent_list[:max_groupings] if max_groupings > 0 else parent_list
             
