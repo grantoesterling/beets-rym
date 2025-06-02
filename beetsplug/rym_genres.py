@@ -97,7 +97,7 @@ class RYMGenresPlugin(BeetsPlugin):
             pass
         
     def commands(self):
-        def rym_command(lib, _opts, args):
+        def rym_command(lib, opts, args):
             """Command to manually fetch genres for specific albums."""
             query = ' '.join(args) if args else ''
             items = lib.albums(query) if query else lib.albums()
@@ -107,6 +107,7 @@ class RYMGenresPlugin(BeetsPlugin):
             total_skipped = 0
             total_missing = 0
             missing_matches = []  # Track missing matches for logging
+            force_update = opts.force  # Check if --force flag is used
             
             for album in items:
                 total_processed += 1
@@ -137,19 +138,22 @@ class RYMGenresPlugin(BeetsPlugin):
                 groupings = self._get_parent_genres(genres)
                 new_grouping = '; '.join(groupings) if groupings else ''
                 
-                # Check if current tags already match the RYM data
-                current_genre = getattr(album, 'genre', '') or ''
-                current_secondary_genre = getattr(album, 'secondary_genre', '') or ''
-                current_descriptor = getattr(album, 'descriptor', '') or ''
-                current_grouping = getattr(album, 'grouping', '') or ''
-                
-                if (current_genre == new_genre and 
-                    current_secondary_genre == new_secondary_genre and 
-                    current_descriptor == new_descriptor and 
-                    current_grouping == new_grouping):
-                    ui.print_(f"⏭️  Skipping (already up-to-date): {album.albumartist} - {album.album}")
-                    total_skipped += 1
-                    continue
+                # Check if current tags already match the RYM data (unless force is used)
+                if not force_update:
+                    current_genre = getattr(album, 'genre', '') or ''
+                    current_secondary_genre = getattr(album, 'secondary_genre', '') or ''
+                    current_descriptor = getattr(album, 'descriptor', '') or ''
+                    current_grouping = getattr(album, 'grouping', '') or ''
+                    
+                    if (current_genre == new_genre and 
+                        current_secondary_genre == new_secondary_genre and 
+                        current_descriptor == new_descriptor and 
+                        current_grouping == new_grouping):
+                        ui.print_(f"⏭️  Skipping (already up-to-date): {album.albumartist} - {album.album}")
+                        total_skipped += 1
+                        continue
+                elif force_update:
+                    ui.print_(f"🔄 Force updating: {album.albumartist} - {album.album}")
                     
                 # Apply tags (but suppress internal logging for command mode)
                 old_log_level = self._log.level
@@ -192,6 +196,8 @@ class RYMGenresPlugin(BeetsPlugin):
                     
             # Summary
             ui.print_(f"\n📊 Summary: Updated {total_updated}/{total_processed} albums, skipped {total_skipped}, missing {total_missing}")
+            if force_update and total_processed > 0:
+                ui.print_(f"   🔄 Force mode: Re-wrote all matched files to ensure proper FLAC array formatting")
             
             # Log missing matches to file if enabled
             if missing_matches and self.config['log_missing_matches'].get(bool):
@@ -212,6 +218,8 @@ class RYMGenresPlugin(BeetsPlugin):
                     ui.print_(f"⚠️  Could not write to log file {logfile_path}: {e}")
         
         rym_cmd = ui.Subcommand('rym', help='fetch RYM genres for albums')
+        rym_cmd.parser.add_option('-f', '--force', action='store_true', 
+                                 help='force update all files even if tags are already up-to-date (useful for fixing FLAC array formatting)')
         rym_cmd.func = rym_command
         return [rym_cmd]
     
@@ -788,13 +796,13 @@ class RYMGenresPlugin(BeetsPlugin):
                 # Use Mutagen directly to write proper FLAC arrays
                 flac_file = FLAC(path_str)
                 
+                arrays_written = False
+                
                 # Convert semicolon-separated strings to lists and write as FLAC arrays
                 for field in ['genre', 'secondary_genre', 'descriptor', 'grouping']:
                     if hasattr(item, field):
                         value = getattr(item, field)
-                        if value and isinstance(value, str) and ';' in value:
-                            list_value = [v.strip() for v in value.split(';') if v.strip()]
-                            
+                        if value and isinstance(value, str):
                             # Map field names to FLAC tag names
                             tag_name = {
                                 'genre': 'GENRE',
@@ -803,27 +811,31 @@ class RYMGenresPlugin(BeetsPlugin):
                                 'grouping': 'GROUPING'
                             }.get(field, field.upper())
                             
-                            # Write as individual FLAC comments
-                            flac_file[tag_name] = list_value
-                            self._log.debug(f"   🔄 Writing {tag_name} as FLAC array: {list_value}")
-                        elif value:
-                            # Handle non-semicolon values
-                            tag_name = {
-                                'genre': 'GENRE',
-                                'secondary_genre': 'SECONDARY_GENRE', 
-                                'descriptor': 'DESCRIPTORS',
-                                'grouping': 'GROUPING'
-                            }.get(field, field.upper())
-                            flac_file[tag_name] = [value]
+                            if ';' in value:
+                                # Split semicolon-separated values into array
+                                list_value = [v.strip() for v in value.split(';') if v.strip()]
+                                flac_file[tag_name] = list_value
+                                arrays_written = True
+                                self._log.debug(f"   🔄 Writing {tag_name} as FLAC array ({len(list_value)} items): {list_value}")
+                            else:
+                                # Single value - still write as array for consistency
+                                flac_file[tag_name] = [value.strip()]
+                                arrays_written = True
+                                self._log.debug(f"   🔄 Writing {tag_name} as FLAC array (1 item): [{value.strip()}]")
                 
-                # Save the FLAC file
-                flac_file.save()
-            else:
-                # Fall back to regular MediaFile writing for non-FLAC files
-                item.try_write()
+                if arrays_written:
+                    # Save the FLAC file with arrays
+                    flac_file.save()
+                    self._log.debug(f"   ✅ Successfully wrote FLAC arrays to {path_str}")
+                    
+                    # Don't call item.try_write() for FLAC files as it might override our arrays
+                    return
+                    
+            # Fall back to regular MediaFile writing for non-FLAC files
+            item.try_write()
                 
         except Exception as e:
-            self._log.warning(f"Error writing FLAC arrays: {e}")
+            self._log.warning(f"Error writing FLAC arrays for {item.path}: {e}")
             # Fall back to regular write
             item.try_write()
 
