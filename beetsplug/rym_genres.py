@@ -97,6 +97,37 @@ class RYMGenresPlugin(BeetsPlugin):
             pass
         
     def commands(self):
+        def _needs_flac_array_update(self, album):
+            """Check if any FLAC files in the album need array formatting updates."""
+            if not MUTAGEN_AVAILABLE:
+                return False
+                
+            for item in album.items():
+                path_str = item.path.decode('utf-8') if isinstance(item.path, bytes) else str(item.path)
+                if not path_str.lower().endswith('.flac'):
+                    continue
+                    
+                try:
+                    flac_file = FLAC(path_str)
+                    
+                    # Check each tag field
+                    for field, tag_name in [('genre', 'GENRE'), ('secondary_genre', 'SECONDARY_GENRE'), 
+                                          ('descriptor', 'DESCRIPTORS'), ('grouping', 'GROUPING')]:
+                        if hasattr(item, field):
+                            item_value = getattr(item, field)
+                            if item_value and isinstance(item_value, str) and ';' in item_value:
+                                # Item has semicolon-separated string
+                                file_values = flac_file.get(tag_name, [])
+                                if len(file_values) == 1 and ';' in file_values[0]:
+                                    # File has single string with semicolons instead of array
+                                    return True
+                                    
+                except Exception:
+                    # If we can't read the file, assume it needs updating
+                    return True
+                    
+            return False
+
         def rym_command(lib, opts, args):
             """Command to manually fetch genres for specific albums."""
             query = ' '.join(args) if args else ''
@@ -138,22 +169,42 @@ class RYMGenresPlugin(BeetsPlugin):
                 groupings = self._get_parent_genres(genres)
                 new_grouping = '; '.join(groupings) if groupings else ''
                 
-                # Check if current tags already match the RYM data (unless force is used)
+                # Check if we need to update (unless force is used)
+                needs_update = force_update
+                update_reason = ""
+                
                 if not force_update:
                     current_genre = getattr(album, 'genre', '') or ''
                     current_secondary_genre = getattr(album, 'secondary_genre', '') or ''
                     current_descriptor = getattr(album, 'descriptor', '') or ''
                     current_grouping = getattr(album, 'grouping', '') or ''
                     
-                    if (current_genre == new_genre and 
-                        current_secondary_genre == new_secondary_genre and 
-                        current_descriptor == new_descriptor and 
-                        current_grouping == new_grouping):
-                        ui.print_(f"⏭️  Skipping (already up-to-date): {album.albumartist} - {album.album}")
-                        total_skipped += 1
-                        continue
+                    # Check if tags are different
+                    tags_different = not (current_genre == new_genre and 
+                                        current_secondary_genre == new_secondary_genre and 
+                                        current_descriptor == new_descriptor and 
+                                        current_grouping == new_grouping)
+                    
+                    # Check if FLAC files need array formatting
+                    flac_needs_arrays = _needs_flac_array_update(self, album)
+                    
+                    if tags_different:
+                        needs_update = True
+                        update_reason = "tags changed"
+                    elif flac_needs_arrays:
+                        needs_update = True
+                        update_reason = "FLAC array formatting needed"
+                    else:
+                        update_reason = "already up-to-date"
+                
+                if not needs_update:
+                    ui.print_(f"⏭️  Skipping ({update_reason}): {album.albumartist} - {album.album}")
+                    total_skipped += 1
+                    continue
                 elif force_update:
                     ui.print_(f"🔄 Force updating: {album.albumartist} - {album.album}")
+                else:
+                    ui.print_(f"🔄 Updating ({update_reason}): {album.albumartist} - {album.album}")
                     
                 # Apply tags (but suppress internal logging for command mode)
                 old_log_level = self._log.level
@@ -197,7 +248,7 @@ class RYMGenresPlugin(BeetsPlugin):
             # Summary
             ui.print_(f"\n📊 Summary: Updated {total_updated}/{total_processed} albums, skipped {total_skipped}, missing {total_missing}")
             if force_update and total_processed > 0:
-                ui.print_(f"   🔄 Force mode: Re-wrote all matched files to ensure proper FLAC array formatting")
+                ui.print_(f"   🔄 Force mode: Updated all matched albums regardless of current state")
             
             # Log missing matches to file if enabled
             if missing_matches and self.config['log_missing_matches'].get(bool):
@@ -219,7 +270,7 @@ class RYMGenresPlugin(BeetsPlugin):
         
         rym_cmd = ui.Subcommand('rym', help='fetch RYM genres for albums')
         rym_cmd.parser.add_option('-f', '--force', action='store_true', 
-                                 help='force update all files even if tags are already up-to-date (useful for fixing FLAC array formatting)')
+                                 help='force update all matched albums regardless of current state (useful when RYM data has been updated)')
         rym_cmd.func = rym_command
         return [rym_cmd]
     
